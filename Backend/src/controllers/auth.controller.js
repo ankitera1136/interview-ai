@@ -1,3 +1,4 @@
+const asyncHandler = require("../utils/asyncHandler")
 const userModel = require("../models/user.model")
 const bcrypt = require("bcryptjs")
 const jwt = require("jsonwebtoken")
@@ -8,7 +9,7 @@ const tokenBlacklistModel = require("../models/blacklist.model")
  * @description register a new user, expects username, email and password in the request body
  * @access Public
  */
-async function registerUserController(req, res) {
+const registerUserController = asyncHandler(async (req, res) => {
 
     const { username, email, password } = req.body
 
@@ -42,8 +43,12 @@ async function registerUserController(req, res) {
         { expiresIn: "1d" }
     )
 
-    res.cookie("token", token)
-
+    res.cookie("token", token, {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === "production",
+        sameSite: "strict",
+        maxAge: 24 * 60 * 60 * 1000
+    })
 
     res.status(201).json({
         message: "User registered successfully",
@@ -53,8 +58,7 @@ async function registerUserController(req, res) {
             email: user.email
         }
     })
-
-}
+})
 
 
 /**
@@ -62,9 +66,15 @@ async function registerUserController(req, res) {
  * @description login a user, expects email and password in the request body
  * @access Public
  */
-async function loginUserController(req, res) {
+const loginUserController = asyncHandler(async (req, res) => {
 
     const { email, password } = req.body
+
+    if (!email || !password) {
+        return res.status(400).json({
+            message: "Please provide email and password"
+        })
+    }
 
     const user = await userModel.findOne({ email })
 
@@ -88,7 +98,13 @@ async function loginUserController(req, res) {
         { expiresIn: "1d" }
     )
 
-    res.cookie("token", token)
+    res.cookie("token", token, {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === "production",
+        sameSite: "strict",
+        maxAge: 24 * 60 * 60 * 1000
+    })
+
     res.status(200).json({
         message: "User loggedIn successfully.",
         user: {
@@ -97,7 +113,7 @@ async function loginUserController(req, res) {
             email: user.email
         }
     })
-}
+})
 
 
 /**
@@ -105,11 +121,14 @@ async function loginUserController(req, res) {
  * @description clear token from user cookie and add the token in blacklist
  * @access public
  */
-async function logoutUserController(req, res) {
+const logoutUserController = asyncHandler(async (req, res) => {
     const token = req.cookies.token
 
     if (token) {
-        await tokenBlacklistModel.create({ token })
+        // store with expiry so TTL index can auto-clean it
+        const decoded = jwt.decode(token)
+        const expiredAt = decoded?.exp ? new Date(decoded.exp * 1000) : new Date(Date.now() + 24 * 60 * 60 * 1000)
+        await tokenBlacklistModel.create({ token, expiredAt })
     }
 
     res.clearCookie("token")
@@ -117,18 +136,20 @@ async function logoutUserController(req, res) {
     res.status(200).json({
         message: "User logged out successfully"
     })
-}
+})
 
 /**
  * @name getMeController
  * @description get the current logged in user details.
  * @access private
  */
-async function getMeController(req, res) {
+const getMeController = asyncHandler(async (req, res) => {
 
     const user = await userModel.findById(req.user.id)
 
-
+    if (!user) {
+        return res.status(404).json({ message: "User not found" })
+    }
 
     res.status(200).json({
         message: "User details fetched successfully",
@@ -138,8 +159,7 @@ async function getMeController(req, res) {
             email: user.email
         }
     })
-
-}
+})
 
 
 
